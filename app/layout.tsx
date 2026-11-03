@@ -1,6 +1,11 @@
 import type { Metadata, Viewport } from 'next'
 import { Analytics } from '@vercel/analytics/next'
+import { DM_Sans, Fraunces, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
+
+const dmSans = DM_Sans({ subsets: ['latin'], weight: ['300', '400', '500', '600'], variable: '--font-dm-sans', display: 'swap' })
+const fraunces = Fraunces({ subsets: ['latin'], weight: ['400', '500', '600', '700'], variable: '--font-fraunces', display: 'swap' })
+const jetbrains = JetBrains_Mono({ subsets: ['latin'], weight: ['300', '400', '500'], variable: '--font-jetbrains', display: 'swap' })
 
 export const metadata: Metadata = {
   title: 'Lantern.fm — Ambient Radio for Late-Night Coders',
@@ -69,20 +74,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="bg-[#050d1a]">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        <link
-          href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Fraunces:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body className="antialiased overflow-hidden">
+    <html lang="en" className={`${dmSans.variable} ${fraunces.variable} ${jetbrains.variable} bg-[#050d1a]`}>
+      <body className="font-sans antialiased overflow-hidden">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
