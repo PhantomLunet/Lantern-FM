@@ -48,16 +48,6 @@ function isSameOrigin(req: NextRequest) {
   }
 }
 
-function safeTimezone(value: string | null) {
-  if (value && /^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){0,2}$/.test(value) && value.length <= 64) {
-    try {
-      new Intl.DateTimeFormat("en-US", { timeZone: value });
-      return value;
-    } catch {}
-  }
-  return "Etc/UTC";
-}
-
 export async function POST(req: NextRequest) {
   if (!isSameOrigin(req)) {
     return json({ status: "error", error: "Forbidden" }, 403);
@@ -103,7 +93,7 @@ export async function POST(req: NextRequest) {
   try {
     let outcome: RecognitionOutcome = { status: "no_match" };
     if (shazamKey) {
-      outcome = await recognizeWithShazam(pcm, shazamKey, safeTimezone(req.headers.get("x-timezone")));
+      outcome = await recognizeWithShazam(pcm, shazamKey);
     }
     if (outcome.status !== "success" && auddToken) {
       const fallback = await recognizeWithAudd(pcm, auddToken);

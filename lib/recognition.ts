@@ -75,20 +75,30 @@ interface ShazamTrack {
   sections?: { type?: string; metadata?: { title?: string; text?: string }[] }[];
 }
 
-export async function recognizeWithShazam(
-  pcm: ArrayBuffer,
-  apiKey: string,
-  timezone: string,
-): Promise<RecognitionOutcome> {
-  const params = new URLSearchParams({ timezone, locale: "en-US" });
-  const res = await fetch(`https://shazam.p.rapidapi.com/songs/v2/detect?${params}`, {
+const SHAZAM_HOST = "shazam-api6.p.rapidapi.com";
+
+function findTrack(data: unknown): ShazamTrack | null {
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+  for (const candidate of [d.track, (d.result as Record<string, unknown> | undefined)?.track, (d.data as Record<string, unknown> | undefined)?.track, d.result]) {
+    if (candidate && typeof candidate === "object" && typeof (candidate as ShazamTrack).title === "string") {
+      return candidate as ShazamTrack;
+    }
+  }
+  return null;
+}
+
+export async function recognizeWithShazam(pcm: ArrayBuffer, apiKey: string): Promise<RecognitionOutcome> {
+  const form = new FormData();
+  form.append("upload_file", pcmToWav(pcm), "clip.wav");
+
+  const res = await fetch(`https://${SHAZAM_HOST}/shazam/recognize/`, {
     method: "POST",
     headers: {
-      "content-type": "text/plain",
       "x-rapidapi-key": apiKey,
-      "x-rapidapi-host": "shazam.p.rapidapi.com",
+      "x-rapidapi-host": SHAZAM_HOST,
     },
-    body: Buffer.from(pcm).toString("base64"),
+    body: form,
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     cache: "no-store",
   });
@@ -103,9 +113,8 @@ export async function recognizeWithShazam(
     return { status: "error", message: "Recognition service unavailable" };
   }
 
-  const data = (await res.json()) as { matches?: unknown[]; track?: ShazamTrack };
-  const track = data.track;
-  if (!data.matches?.length || !track) return { status: "no_match" };
+  const track = findTrack(await res.json().catch(() => null));
+  if (!track) return { status: "no_match" };
 
   const title = text(track.title) ?? "Unknown title";
   const artist = text(track.subtitle) ?? "Unknown artist";
