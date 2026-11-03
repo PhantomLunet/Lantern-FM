@@ -1,74 +1,126 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from "next/server";
+import { recognizeWithAudd, recognizeWithShazam, type RecognitionOutcome } from "@/lib/recognition";
 
-export async function POST(request: NextRequest) {
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 30;
+
+const BYTES_PER_SECOND = 44100 * 2;
+const MIN_BYTES = BYTES_PER_SECOND * 1;
+const MAX_BYTES = BYTES_PER_SECOND * 5;
+
+const RATE_LIMIT = 8;
+const RATE_WINDOW_MS = 60_000;
+// Best-effort per-instance limiter; use a shared store (e.g. Upstash) for strict global limits.
+const hits = new Map<string, { count: number; reset: number }>();
+
+function rateLimited(key: string) {
+  const now = Date.now();
+  if (hits.size > 5000) {
+    for (const [k, v] of hits) if (v.reset < now) hits.delete(k);
+  }
+  const entry = hits.get(key);
+  if (!entry || entry.reset < now) {
+    hits.set(key, { count: 1, reset: now + RATE_WINDOW_MS });
+    return false;
+  }
+  entry.count++;
+  return entry.count > RATE_LIMIT;
+}
+
+function json(body: object, status = 200, extra?: HeadersInit) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store", ...extra },
+  });
+}
+
+function isSameOrigin(req: NextRequest) {
+  const site = req.headers.get("sec-fetch-site");
+  if (site) return site === "same-origin";
+  const origin = req.headers.get("origin");
+  if (!origin) return false;
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   try {
-    const formData = await request.formData();
-    const audioFile = formData.get('audio') as File | null;
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
 
-    if (!audioFile) {
-      return NextResponse.json(
-        { status: 'error', error: 'No audio file provided' },
-        { status: 400 }
-      );
-    }
+function safeTimezone(value: string | null) {
+  if (value && /^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){0,2}$/.test(value) && value.length <= 64) {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: value });
+      return value;
+    } catch {}
+  }
+  return "Etc/UTC";
+}
 
-    const apiToken = process.env.AUDD_API_TOKEN;
+export async function POST(req: NextRequest) {
+  if (!isSameOrigin(req)) {
+    return json({ status: "error", error: "Forbidden" }, 403);
+  }
 
-    if (!apiToken) {
-      // Demo mode — no API key configured
-      return NextResponse.json({
-        status: 'demo',
-        result: null,
-        message:
-          'Song recognition is not configured. Set the AUDD_API_TOKEN environment variable to enable real song identification. Get a free key at https://audd.io/',
-      });
-    }
+  const ip =
+    req.headers.get("x-real-ip") ??
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    "unknown";
+  if (rateLimited(ip)) {
+    return json({ status: "error", error: "Too many requests — wait a moment" }, 429, { "Retry-After": "60" });
+  }
 
-    // Forward the audio to AudD for recognition
-    const auddForm = new FormData();
-    auddForm.append('file', audioFile);
-    auddForm.append('api_token', apiToken);
-    auddForm.append('return', 'apple_music,spotify');
+  if (req.headers.get("content-type")?.split(";")[0] !== "application/octet-stream") {
+    return json({ status: "error", error: "Unsupported media type" }, 415);
+  }
 
-    const response = await fetch('https://api.audd.io/', {
-      method: 'POST',
-      body: auddForm,
+  const declared = Number(req.headers.get("content-length") ?? 0);
+  if (declared > MAX_BYTES) {
+    return json({ status: "error", error: "Audio clip too large" }, 413);
+  }
+
+  let pcm: ArrayBuffer;
+  try {
+    pcm = await req.arrayBuffer();
+  } catch {
+    return json({ status: "error", error: "Invalid audio payload" }, 400);
+  }
+  if (pcm.byteLength > MAX_BYTES) return json({ status: "error", error: "Audio clip too large" }, 413);
+  if (pcm.byteLength < MIN_BYTES || pcm.byteLength % 2 !== 0) {
+    return json({ status: "error", error: "Audio clip too short" }, 400);
+  }
+
+  const shazamKey = process.env.RAPIDAPI_KEY;
+  const auddToken = process.env.AUDD_API_TOKEN;
+  if (!shazamKey && !auddToken) {
+    return json({
+      status: "unconfigured",
+      error: "Song recognition isn't configured on this server",
     });
+  }
 
-    if (!response.ok) {
-      return NextResponse.json(
-        { status: 'error', error: 'Recognition service returned an error' },
-        { status: 502 }
-      );
+  try {
+    let outcome: RecognitionOutcome = { status: "no_match" };
+    if (shazamKey) {
+      outcome = await recognizeWithShazam(pcm, shazamKey, safeTimezone(req.headers.get("x-timezone")));
+    }
+    if (outcome.status !== "success" && auddToken) {
+      const fallback = await recognizeWithAudd(pcm, auddToken);
+      if (fallback.status === "success" || outcome.status === "error") outcome = fallback;
     }
 
-    const data = await response.json();
-
-    if (data.status === 'success' && data.result) {
-      return NextResponse.json({
-        status: 'success',
-        result: {
-          title: data.result.title || 'Unknown Title',
-          artist: data.result.artist || 'Unknown Artist',
-          album: data.result.album || null,
-          releaseDate: data.result.release_date || null,
-          spotify: data.result.spotify?.external_urls?.spotify || null,
-          appleMusic: data.result.apple_music?.url || null,
-        },
-      });
+    if (outcome.status === "success") return json(outcome);
+    if (outcome.status === "no_match") {
+      return json({ status: "no_match", error: "No match — try again closer to the speaker" });
     }
-
-    // No match found
-    return NextResponse.json({
-      status: 'no_match',
-      result: null,
-      message: 'Could not identify the song. Try again with a clearer audio sample.',
-    });
-  } catch (error) {
-    console.error('[recognize] Error:', error);
-    return NextResponse.json(
-      { status: 'error', error: 'Internal server error during recognition' },
-      { status: 500 }
+    return json({ status: "error", error: outcome.message }, 502);
+  } catch (err) {
+    const timedOut = err instanceof DOMException && err.name === "TimeoutError";
+    console.error("[recognize] Failed:", timedOut ? "upstream timeout" : err);
+    return json(
+      { status: "error", error: timedOut ? "Recognition timed out" : "Recognition failed" },
+      timedOut ? 504 : 500,
     );
   }
 }

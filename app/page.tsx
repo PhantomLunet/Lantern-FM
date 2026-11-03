@@ -1,13 +1,14 @@
 
 "use client";
 
-import { useState, useEffect, useMemo, useRef, useCallback, memo } from "react";
+import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Play, Pause, Volume2, VolumeX,
-  Sun, Moon, Sliders, X, Radio, RefreshCw, Mic, Square,
-  Menu, ExternalLink, Music,
+  Sun, Moon, Sliders, X, Radio, RefreshCw,
+  Menu,
 } from "lucide-react";
+import { SongIdentifier } from "@/components/song-identifier";
 import { useNoiseGenerator } from "@/hooks/use-noise-generator";
 import { useIsMobile } from "@/hooks/use-mobile";
 
@@ -93,7 +94,7 @@ const STATIONS: Station[] = [
     genre: "Classical",
     color: "#EC4899",
     rgb: "236,72,153",
-    streamUrl: "https://live.musopen.org:8085/streamvbr0", // Reliable Classical Stream
+    streamUrl: "https://wfmt.streamguys1.com/main-mp3",
     baseListeners: 7400,
   },
   {
@@ -332,7 +333,7 @@ const LanternSVG = memo(function LanternSVG({
           style={{
             animation: (isPlaying && isLightOn)
               ? "flameFlicker 0.85s ease-in-out infinite"
-              : "lanternPulse 4.2s ease-in-out infinite",
+              : "none",
             transformOrigin: "74px 141px",
             opacity: isLightOn ? 1 : 0,
             transition: transitionStr,
@@ -345,7 +346,7 @@ const LanternSVG = memo(function LanternSVG({
           style={{
             animation: (isPlaying && isLightOn)
               ? "flameFlicker 0.65s ease-in-out infinite reverse"
-              : "lanternPulse 3.2s ease-in-out infinite",
+              : "none",
             transformOrigin: "74px 125px",
             opacity: isLightOn ? 1 : 0,
             transition: transitionStr,
@@ -491,9 +492,6 @@ export default function LanternFM() {
 
   const [location, setLocation] = useState<{ city: string; temp: number; condition: string } | null>(null);
   const [locationLoading, setLocationLoading] = useState(true);
-  const [isShazaming, setIsShazaming] = useState(false);
-  const [shazamResult, setShazamResult] = useState<{ title: string; artist: string; spotify?: string | null; appleMusic?: string | null } | null>(null);
-  const [shazamError, setShazamError] = useState<string | null>(null);
   const [ambientLevels, setAmbientLevels] = useState<Record<string, number>>({
     rain: 0, cafe: 0, thunder: 0, vinyl: 0, keys: 0, fire: 0, train: 0, wind: 0,
   });
@@ -509,9 +507,6 @@ export default function LanternFM() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
 
   // Use noise generator for ambient sounds
   const { initAudioContext: initNoiseContext } = useNoiseGenerator({
@@ -709,119 +704,11 @@ export default function LanternFM() {
     setStation(newStation);
   };
 
-  // ─── REAL SHAZAM ──────────────────────────────────
-
-  const handleShazam = async () => {
-    if (isShazaming) {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        mediaRecorderRef.current.stop();
-      }
-      return;
-    }
-
-    setIsShazaming(true);
-    setShazamResult(null);
-    setShazamError(null);
-    recordedChunksRef.current = [];
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4',
-      });
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          recordedChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach(track => track.stop());
-
-        if (recordedChunksRef.current.length === 0) {
-          setIsShazaming(false);
-          setShazamError("No audio recorded");
-          return;
-        }
-
-        try {
-          const audioBlob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-          const formData = new FormData();
-          formData.append('audio', audioBlob, 'recording.webm');
-
-          const response = await fetch('/api/recognize', {
-            method: 'POST',
-            body: formData,
-          });
-
-          const data = await response.json();
-
-          if (data.status === 'success' && data.result) {
-            setShazamResult({
-              title: data.result.title,
-              artist: data.result.artist,
-              spotify: data.result.spotify,
-              appleMusic: data.result.appleMusic,
-            });
-            setTimeout(() => setShazamResult(null), 8000);
-          } else if (data.status === 'demo') {
-            setShazamError("Setup AUDD_API_TOKEN in .env for real Shazam");
-            setTimeout(() => { setShazamError(null); }, 6000);
-          } else {
-            setShazamError(data.error || "No match found");
-            setTimeout(() => setShazamError(null), 4000);
-          }
-        } catch {
-          setShazamError("Network error");
-          setTimeout(() => setShazamError(null), 4000);
-        }
-        setIsShazaming(false);
-      };
-
-      mediaRecorder.onerror = () => {
-        setIsShazaming(false);
-        setShazamError("Recording failed");
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorder.start();
-      setTimeout(() => {
-        if (mediaRecorder.state === 'recording') {
-          mediaRecorder.stop();
-        }
-      }, 5000);
-    } catch (err) {
-      setIsShazaming(false);
-      setShazamError("Microphone access denied");
-    }
-  };
-
   const timeStr = mounted
     ? time.toLocaleTimeString("en-US", {
       hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
     })
     : "--:--:--";
-
-  const rainDrops = useMemo(() =>
-    Array.from({ length: 45 }, (_, i) => ({
-      id: i,
-      left: `${Math.random() * 100}%`,
-      delay: `${(Math.random() * 2.5).toFixed(2)}s`,
-      duration: `${(0.55 + Math.random() * 0.75).toFixed(2)}s`,
-      opacity: +(0.04 + Math.random() * 0.13).toFixed(3),
-      width: Math.random() > 0.55 ? 1.5 : 1,
-    })), []);
-
-  const particles = useMemo(() =>
-    Array.from({ length: 28 }, (_, i) => ({
-      id: i,
-      left: `${8 + Math.random() * 84}%`,
-      size: +(1.2 + Math.random() * 2.8).toFixed(2),
-      delay: `${(Math.random() * 7).toFixed(2)}s`,
-      duration: `${(4.5 + Math.random() * 5).toFixed(2)}s`,
-    })), []);
 
   // ─── Sidebar Content ─────
 
@@ -845,7 +732,7 @@ export default function LanternFM() {
             <img src="/Lantern.svg" alt="Lantern logo" style={{ width: 16, height: 18 }} />
           </motion.div>
           <span style={{
-            fontFamily: "'Fraunces', serif",
+            fontFamily: "var(--font-fraunces), serif",
             fontSize: 20, fontWeight: 600, letterSpacing: "-.025em",
             color: T.text,
           }}>Lantern.fm</span>
@@ -860,7 +747,7 @@ export default function LanternFM() {
       {/* Station list */}
       <div style={{ padding: "0 10px", flex: 1, overflowY: "auto" }}>
         <p style={{
-          fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace",
+          fontSize: 9.5, fontFamily: "var(--font-jetbrains), monospace",
           color: T.textMuted, letterSpacing: ".16em", textTransform: "uppercase",
           padding: "0 12px", marginBottom: 10,
         }}>Stations</p>
@@ -946,7 +833,7 @@ export default function LanternFM() {
             animation: "breatheDot 2.2s ease-in-out infinite",
           }} />
           <span style={{
-            fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 10.5, fontFamily: "var(--font-jetbrains), monospace",
             color: T.textMuted,
           }}>{activeListeners.toLocaleString()} builders online</span>
         </div>
@@ -980,7 +867,7 @@ export default function LanternFM() {
         width: "100vw", height: "100dvh", display: "flex",
         overflow: "hidden", position: "relative",
         background: T.bg, color: T.text,
-        fontFamily: "'DM Sans', sans-serif",
+        fontFamily: "var(--font-dm-sans), sans-serif",
         transition: "background .7s ease, color .4s ease",
       }}>
 
@@ -1085,7 +972,7 @@ export default function LanternFM() {
               )}
 
               <div style={{
-                fontFamily: "'JetBrains Mono', monospace",
+                fontFamily: "var(--font-jetbrains), monospace",
                 fontSize: isMobile ? 15 : 18, fontWeight: 300,
                 color: T.text, letterSpacing: ".06em",
               }}>{timeStr}</div>
@@ -1114,7 +1001,7 @@ export default function LanternFM() {
                   }}
                 />
                 <span style={{
-                  fontSize: 10.5, fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 10.5, fontFamily: "var(--font-jetbrains), monospace",
                   color: station.color, letterSpacing: ".08em",
                 }}>{playing ? 'LIVE' : station.genre.toUpperCase()}</span>
               </motion.div>
@@ -1128,7 +1015,7 @@ export default function LanternFM() {
                 style={{
                   padding: "6px 14px", borderRadius: 8, cursor: "pointer",
                   display: "flex", alignItems: "center", gap: 6, fontSize: 12,
-                  fontFamily: "'DM Sans', sans-serif",
+                  fontFamily: "var(--font-dm-sans), sans-serif",
                   background: showMixer ? `rgba(${station.rgb},.1)` : "transparent",
                   border: `1px solid ${showMixer ? `rgba(${station.rgb},.38)` : T.cardB}`,
                   color: showMixer ? station.color : T.textMuted,
@@ -1214,14 +1101,14 @@ export default function LanternFM() {
                     transition={{ duration: 0.4 }}
                   >
                     <p style={{
-                      fontFamily: "'JetBrains Mono', monospace",
+                      fontFamily: "var(--font-jetbrains), monospace",
                       fontSize: 10, color: station.color,
                       letterSpacing: ".22em", textTransform: "uppercase",
                       marginBottom: 12, opacity: .9,
                     }}>{playing ? 'Now Streaming' : 'Ready to Play'}</p>
 
                     <h1 style={{
-                      fontFamily: "'Fraunces', serif",
+                      fontFamily: "var(--font-fraunces), serif",
                       fontSize: isMobile ? 32 : 44, fontWeight: 700,
                       color: T.text, lineHeight: 1.05,
                       letterSpacing: "-.035em", marginBottom: 8,
@@ -1272,127 +1159,12 @@ export default function LanternFM() {
                 transition={{ delay: 0.15 }}
                 style={{ order: 3 }}
               >
-                <div>
-                  <p style={{
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: 10, color: station.color,
-                    letterSpacing: ".22em", textTransform: "uppercase",
-                    marginBottom: 12, opacity: .9,
-                    textAlign: isMobile ? "center" : "left",
-                  }}>Identify Song</p>
-
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.97 }}
-                    onClick={handleShazam}
-                    style={{
-                      width: "100%",
-                      padding: "16px 20px",
-                      borderRadius: 14,
-                      background: isShazaming
-                        ? `linear-gradient(135deg, rgba(${station.rgb},.25), rgba(${station.rgb},.15))`
-                        : T.card,
-                      border: `1px solid ${isShazaming ? station.color : T.cardB}`,
-                      backdropFilter: "blur(18px)",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 10,
-                      position: "relative",
-                      overflow: "hidden",
-                      transition: "background .3s ease, border-color .3s ease",
-                    }}
-                  >
-                    {isShazaming && (
-                      <>
-                        <motion.div
-                          style={{
-                            position: "absolute", width: 60, height: 60,
-                            borderRadius: "50%",
-                            border: `2px solid rgba(${station.rgb},.4)`,
-                          }}
-                          animate={{ scale: [1, 2.8], opacity: [0.6, 0] }}
-                          transition={{ repeat: Infinity, duration: 1.8, ease: "easeOut" }}
-                        />
-                        <motion.div
-                          style={{
-                            position: "absolute", width: 60, height: 60,
-                            borderRadius: "50%",
-                            border: `2px solid rgba(${station.rgb},.3)`,
-                          }}
-                          animate={{ scale: [1, 2.8], opacity: [0.5, 0] }}
-                          transition={{ repeat: Infinity, duration: 1.8, ease: "easeOut", delay: 0.6 }}
-                        />
-                      </>
-                    )}
-
-                    {isShazaming ? (
-                      <>
-                        <motion.div
-                          animate={{ scale: [1, 1.15, 1] }}
-                          transition={{ repeat: Infinity, duration: 1 }}
-                          style={{
-                            width: 24, height: 24, borderRadius: "50%",
-                            background: `rgba(${station.rgb},.3)`,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            position: "relative", zIndex: 2,
-                          }}
-                        >
-                          <Square size={10} color={station.color} fill={station.color} />
-                        </motion.div>
-                        <span style={{ fontSize: 12, fontWeight: 500, color: station.color, position: "relative", zIndex: 2 }}>
-                          Listening...
-                        </span>
-                      </>
-                    ) : shazamResult ? (
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        style={{ textAlign: "center" }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 2 }}>
-                          <Music size={12} color={station.color} />
-                          <div style={{ fontSize: 12, fontWeight: 600, color: station.color }}>
-                            {shazamResult.title}
-                          </div>
-                        </div>
-                        <div style={{ fontSize: 10, color: T.textMuted }}>
-                          {shazamResult.artist}
-                        </div>
-                        {(shazamResult.spotify || shazamResult.appleMusic) && (
-                          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 6 }}>
-                            {shazamResult.spotify && (
-                              <a href={shazamResult.spotify} target="_blank" rel="noopener noreferrer"
-                                style={{ fontSize: 10, color: "#1DB954", textDecoration: "none", display: "flex", alignItems: "center", gap: 3 }}>
-                                <ExternalLink size={9} /> Spotify
-                              </a>
-                            )}
-                            {shazamResult.appleMusic && (
-                              <a href={shazamResult.appleMusic} target="_blank" rel="noopener noreferrer"
-                                style={{ fontSize: 10, color: "#FC3C44", textDecoration: "none", display: "flex", alignItems: "center", gap: 3 }}>
-                                <ExternalLink size={9} /> Apple Music
-                              </a>
-                            )}
-                          </div>
-                        )}
-                      </motion.div>
-                    ) : shazamError ? (
-                      <motion.span
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        style={{ fontSize: 11, color: '#ef4444' }}
-                      >{shazamError}</motion.span>
-                    ) : (
-                      <>
-                        <Mic size={18} color={T.textMuted} />
-                        <span style={{ fontSize: 12, fontWeight: 500, color: T.text }}>
-                          Tap to Identify
-                        </span>
-                      </>
-                    )}
-                  </motion.button>
-                </div>
+                <SongIdentifier
+                  color={station.color}
+                  rgb={station.rgb}
+                  theme={T}
+                  align={isMobile ? "center" : "left"}
+                />
               </motion.div>
             </div>
           </main>
@@ -1486,7 +1258,7 @@ export default function LanternFM() {
               {!isMobile && (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", maxWidth: 300 }}>
                   <span style={{
-                    fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 10, fontFamily: "var(--font-jetbrains), monospace",
                     color: playing ? station.color : T.textMuted, minWidth: 34, textAlign: 'right'
                   }}>{playing ? 'LIVE' : '---'}</span>
 
@@ -1558,7 +1330,7 @@ export default function LanternFM() {
 
               {!isMobile && (
                 <span style={{
-                  fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 10, fontFamily: "var(--font-jetbrains), monospace",
                   color: T.textDim, minWidth: 26, textAlign: "right",
                 }}>{muted ? 0 : volume}</span>
               )}
@@ -1591,7 +1363,7 @@ export default function LanternFM() {
               {/* Header */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                 <h3 style={{
-                  fontFamily: "'Fraunces', serif",
+                  fontFamily: "var(--font-fraunces), serif",
                   fontSize: 19, fontWeight: 600, color: T.text,
                 }}>Ambient Mixer</h3>
                 <motion.button
@@ -1624,7 +1396,7 @@ export default function LanternFM() {
                         <span style={{ fontSize: 12.5, color: T.text, fontWeight: 500 }}>{s.name}</span>
                       </div>
                       <span style={{
-                        fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: 10, fontFamily: "var(--font-jetbrains), monospace",
                         color: ambientLevels[s.id] > 0 ? station.color : T.textMuted,
                         fontWeight: ambientLevels[s.id] > 0 ? 500 : 400,
                       }}>{ambientLevels[s.id]}%</span>
