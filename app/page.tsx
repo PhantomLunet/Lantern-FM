@@ -6,12 +6,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Play, Pause, Volume2, VolumeX,
   Sun, Moon, Sliders, X, Radio, RefreshCw,
-  Menu,
+  Menu, Sparkles,
 } from "lucide-react";
 import { SongIdentifier } from "@/components/song-identifier";
 import { useNoiseGenerator } from "@/hooks/use-noise-generator";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useOnlinePresence } from "@/hooks/use-online-presence";
+import { IntroAnimation } from "@/components/intro-animation";
+import { AddToHomeScreenCard, AddToHomeScreenHeaderButton } from "@/components/add-to-home-screen";
 
 // ─── Data ────────────────────────────────────────────────────────────────────
 
@@ -500,8 +502,22 @@ export default function LanternFM() {
   const isMobile = useIsMobile();
   const [mounted, setMounted] = useState(false);
 
+  // Intro animation state
+  const [showIntro, setShowIntro] = useState(true);
+
   useEffect(() => {
     setMounted(true);
+    if (typeof window !== "undefined") {
+      const seen = sessionStorage.getItem("lantern_intro_seen");
+      if (seen) setShowIntro(false);
+    }
+  }, []);
+
+  const handleIntroComplete = useCallback(() => {
+    setShowIntro(false);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("lantern_intro_seen", "true");
+    }
   }, []);
 
   // Audio refs
@@ -701,26 +717,52 @@ export default function LanternFM() {
     <>
       {/* Logo */}
       <div style={{ padding: "0 22px 24px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <motion.div
-            whileHover={{ scale: 1.1, rotate: 5 }}
-            transition={{ type: "spring", stiffness: 400 }}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <div
+            onClick={() => setShowIntro(true)}
+            title="Replay cinematic intro animation"
+            style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+          >
+            <motion.div
+              whileHover={{ scale: 1.1, rotate: 5 }}
+              transition={{ type: "spring", stiffness: 400 }}
+              style={{
+                width: 32, height: 32, borderRadius: 9,
+                background: `rgba(${station.rgb},.14)`,
+                border: `1px solid rgba(${station.rgb},.3)`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: `0 0 14px rgba(${station.rgb},.22)`,
+                transition: "all .5s ease", flexShrink: 0,
+              }}
+            >
+              <img src="/Lantern.svg" alt="Lantern logo" style={{ width: 16, height: 18 }} />
+            </motion.div>
+            <span style={{
+              fontFamily: "var(--font-fraunces), serif",
+              fontSize: 20, fontWeight: 600, letterSpacing: "-.025em",
+              color: T.text,
+            }}>Lantern.fm</span>
+          </div>
+
+          <motion.button
+            type="button"
+            whileHover={{ scale: 1.15 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setShowIntro(true)}
+            title="Replay intro animation"
             style={{
-              width: 32, height: 32, borderRadius: 9,
-              background: `rgba(${station.rgb},.14)`,
-              border: `1px solid rgba(${station.rgb},.3)`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              boxShadow: `0 0 14px rgba(${station.rgb},.22)`,
-              transition: "all .5s ease", flexShrink: 0,
+              background: "transparent",
+              border: "none",
+              color: T.textMuted,
+              cursor: "pointer",
+              padding: 5,
+              display: "flex",
+              alignItems: "center",
+              borderRadius: 6,
             }}
           >
-            <img src="/Lantern.svg" alt="Lantern logo" style={{ width: 16, height: 18 }} />
-          </motion.div>
-          <span style={{
-            fontFamily: "var(--font-fraunces), serif",
-            fontSize: 20, fontWeight: 600, letterSpacing: "-.025em",
-            color: T.text,
-          }}>Lantern.fm</span>
+            <Sparkles size={14} color={station.color} />
+          </motion.button>
         </div>
         <p style={{ fontSize: 11, color: T.textMuted, paddingLeft: 42, letterSpacing: ".02em", lineHeight: 1.4 }}>
           Ambient radio for late&#8209;night coders.
@@ -844,12 +886,23 @@ export default function LanternFM() {
             </>
           )}
         </div>
+
+        {/* Add to Home Screen section */}
+        <div style={{ marginTop: 14 }}>
+          <AddToHomeScreenCard color={station.color} rgb={station.rgb} theme={T} />
+        </div>
       </div>
     </>
   );
 
   return (
     <>
+      <AnimatePresence>
+        {showIntro && (
+          <IntroAnimation onComplete={handleIntroComplete} accentColor={station.color} />
+        )}
+      </AnimatePresence>
+
       <div style={{
         width: "100vw", height: "100dvh", display: "flex",
         overflow: "hidden", position: "relative",
@@ -995,6 +1048,8 @@ export default function LanternFM() {
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <AddToHomeScreenHeaderButton color={station.color} rgb={station.rgb} theme={T} />
+
               <motion.button
                 whileHover={{ scale: 1.04 }}
                 whileTap={{ scale: 0.96 }}

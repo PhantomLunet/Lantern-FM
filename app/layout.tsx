@@ -12,6 +12,12 @@ export const metadata: Metadata = {
   description:
     'A cinematic ambient radio platform designed for late-night coders, creatives, indie hackers, writers, and deep-focus builders. Lo-fi beats, jazz café vibes, rain + piano, and more.',
   generator: 'Next.js',
+  applicationName: 'Lantern.fm',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'Lantern.fm',
+  },
   keywords: [
     'lofi',
     'ambient',
@@ -42,19 +48,27 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       {
-        url: '/Lantern.png',
-        media: '(prefers-color-scheme: light)',
+        url: '/icon-192.png',
+        sizes: '192x192',
+        type: 'image/png',
       },
       {
-        url: '/Lantern.png',
-        media: '(prefers-color-scheme: dark)',
+        url: '/icon-512.png',
+        sizes: '512x512',
+        type: 'image/png',
       },
       {
         url: '/Lantern.svg',
         type: 'image/svg+xml',
       },
     ],
-    apple: '/Lantern.png',
+    apple: [
+      {
+        url: '/apple-touch-icon.png',
+        sizes: '180x180',
+        type: 'image/png',
+      },
+    ],
   },
 }
 
